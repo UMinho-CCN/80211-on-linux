@@ -1,0 +1,31 @@
+# In order to be able to set, e.g., OCB mode, ``iw`` has to have
+# IEEE 802.11p support.
+
+- name: get available version of ``iw`` from apt
+  register: apt_show_iw_result
+  shell: apt show iw | grep Version | cut -d' ' -f2
+  changed_when: false
+
+- name: assert that version of ``iw`` is sufficient
+  assert:
+    that:
+      - apt_show_iw_result.stdout_lines.0 is version('4.0', '>=')
+    msg: >
+      ``iw`` must be available in version 4.0 or later.
+      Since Debian 10 and later provide the aforementioned version,
+      this Playbook does currently not implement the installation
+      of a "custom" (i.e., outside apt) updated version of ``iw``.
+  tags: verify
+
+- name: install ``iw``
+  apt:
+    name: iw
+  become: yes
+  tags: online
+
+- name: verify ``iw`` actually supports OCB
+  register: iw_result
+  command: /sbin/iw
+  changed_when: false
+  failed_when: "'ocb join' not in iw_result.stdout"
+  tags: verify

@@ -1,0 +1,57 @@
+# The final step is to verify the new regulatory data with the
+# Central Regulatory Domain Agent.
+
+# crda is removed in Boockworm/Jammy, so compile it consistently for
+# all supported distributions (instead of using version conditionals)
+
+- name: install dependencies of ``crda``
+  apt:
+    name:
+      - git
+      - pkg-config
+      - libnl-3-dev
+      - libgcrypt20-dev
+      - python3-m2crypto
+      - libnl-genl-3-dev
+  become: yes
+  tags: online
+
+- name: clone repository of ``crda``
+  git:
+    repo: git://git.kernel.org/pub/scm/linux/kernel/git/mcgrof/crda.git
+    dest: "{{ crda_source_dir }}"
+    force: yes
+  tags: online
+
+- name: patch ``crda`` sources
+  patch:
+    basedir: "{{ crda_source_dir }}"
+    src: ../../../../patches/crda.patch
+
+- name: compile and install ``crda``
+  make:
+    target: "{{ item.target }}"
+    chdir: "{{ crda_source_dir }}"
+    params:
+      # is this the proper way to do it?
+      "--jobs": "{{ ansible_processor_vcpus }}"
+      PUBKEY_DIR: /usr/lib/crda/pubkeys
+  become: "{{ item.become }}"
+  with_items:
+    - target: regdbdump
+      become: no
+    - target: install
+      become: yes
+- name: reboot for updates to take effect
+  reboot:
+    reboot_timeout: 120
+
+- name: verify updates to regulatory domain
+  register: regdbdump_result
+  command: /usr/sbin/regdbdump /lib/crda/regulatory.bin
+  changed_when: false
+  # check for the control channel only as a sample
+  failed_when: "
+    '\t(5855.000 - 5925.000 @ 10.000), (100.00), (N/A)'
+    not in regdbdump_result.stdout_lines"
+  tags: verify

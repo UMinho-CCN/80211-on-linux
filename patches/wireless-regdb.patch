@@ -1,0 +1,55 @@
+--- db.txt
++++ db.txt
+@@ -26,6 +26,25 @@
+ 	# IEEE 802.11ad (60GHz), channels 1..3
+ 	(57240 - 63720 @ 2160), (0)
+ 
++	# ETSI ITS G5 (EN 302 663, IEEE 802.11p)
++	# (this should normally not go into the world regulatory domain,
++	# but for lab experiments we think this is okay, so the bands
++	# are available in all regulatory domains right away)
++	# ITS-G5B G5-SCH4:
++	(5855 - 5865 @ 10), (0)
++	# ITS-G5B G5-SCH3:
++	(5865 - 5875 @ 10), (23)
++	# ITS-G5B G5-SCH1:
++	(5875 - 5885 @ 10), (33)
++	# ITS-G5B G5-SCH2:
++	(5885 - 5895 @ 10), (23)
++	# ITS-G5B G5-CCH:
++	(5895 - 5905 @ 10), (33)
++	# ITS-G5B G5-SCH5:
++	(5905 - 5915 @ 10), (0)
++	# ITS-G5B G5-SCH6:
++	(5915 - 5925 @ 10), (0)
++
+ # AD as part of CEPT accepted decisions 2005/513/EC (5GHz RLAN, EN 301 893)
+ # and 2006/771/EC (amended by 2008/432/EC, Short-Range Devices, EN 300 440)
+ #  EU decision 2005/513/EC: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02005D0513-20070213
+@@ -1655,3 +1666,9 @@
+ 	(5250 - 5330 @ 80), (20), DFS, AUTO-BW
+ 	(5490 - 5710 @ 160), (27), DFS
+ 
++# This custom domain used for 802.11p jamming experiments violates
++# regulations and is thereby illegal. Use in isolated environments
++# for research only.
++country XX:
++	(5855 - 5925 @ 10), (100)
++
+
+--- Makefile
++++ Makefile
+@@ -57,11 +57,11 @@ mrproper: clean maintainer-clean
+ 
+ regulatory.bin: db.txt $(REGDB_PRIVKEY) $(REGDB_PUBKEY)
+ 	@echo Generating $@ digitally signed by $(REGDB_AUTHOR)...
+-	./db2bin.py regulatory.bin db.txt $(REGDB_PRIVKEY)
++	python3 ./db2bin.py regulatory.bin db.txt $(REGDB_PRIVKEY)
+ 
+ regulatory.db: db.txt db2fw.py
+ 	@echo "Generating $@"
+-	./db2fw.py regulatory.db db.txt
++	python3 ./db2fw.py regulatory.db db.txt
+ 
+ regulatory.db.p7s: regulatory.db $(REGDB_PRIVKEY) $(REGDB_PUBCERT)
+ 	@echo "Signing regulatory.db (by $(REGDB_AUTHOR))..."

@@ -1,0 +1,30 @@
+- include_tasks: ../../_include/tasks/detect_wireless_interface.yml
+
+- name: remove IP addresses from interface
+  command: "ip address flush dev {{ wireless_interface }}"
+  tags: configure
+  become: yes
+
+- name: derive CIDR from default interface
+  register: wireless_cidr_detected
+  set_fact:
+    wireless_cidr: "10.1.1.{{
+      (ansible_default_ipv4.address | ipaddr('int') % 253 ) + 1
+    }}/24"
+  when: not wireless_cidr is defined
+  tags: configure
+
+- name: warn if wireless CIDR is not set explicitly
+  debug:
+    msg: >
+      Variable ``wireless_cidr`` not set explicitly in configuration.
+      Your probably want to do this.
+      Using {{ wireless_cidr }} meanwhile.
+  when: wireless_cidr_detected is defined
+  tags: configure
+
+- name: set IP configuration
+  command: "ip address add {{ wireless_cidr }} brd + dev
+            {{ wireless_interface }}"
+  tags: configure
+  become: yes

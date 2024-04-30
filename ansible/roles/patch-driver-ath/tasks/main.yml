@@ -1,0 +1,228 @@
+- name: install required packages to get friendly name of devices
+  package:
+    name:
+      - pciutils
+      - usbutils
+  become: yes
+  tags: online
+
+- name: get friendly name of wireless device
+  register: wireless_device
+  shell: |
+    cd /sys/class/net/{{ wireless_modules }}/device
+    export d=$(cat vendor):$(cat device); lspci -d $d || lsusb -d $d
+  changed_when: false
+
+- name: install required firmwares
+  package:
+    name: firmware-atheros
+  become: yes
+  tags: online
+  when: >-
+    'QCA' in wireless_device.stdout or
+    'AR7010' in wireless_device.stdout or
+    'AR9271' in wireless_device.stdout
+
+
+
+- name: query kernel package in use
+  register: get_kernel_package_result
+  shell: >-
+    dpkg -S 'vmlinuz-{{ ansible_kernel }}'
+    | cut -d: -f1
+  changed_when: false
+
+- name: set kernel package in use
+  set_fact:
+    kernel_package: >-
+      {{ get_kernel_package_result.stdout_lines.0 }}
+
+
+
+- name: query kernel package version
+  register: dpkg_linux_version_result
+  shell: >-
+    dpkg -s {{ kernel_package }}
+    | grep Version
+    | cut -d' ' -f2
+  changed_when: false
+
+- name: set kernel version to use
+  set_fact:
+    # e.g., "5.10.13-1"
+    kernel_package_version: >-
+      {{ dpkg_linux_version_result.stdout_lines.0 }}
+
+- name: extract kernel major and minor version
+  set_fact:
+    # e.g., extract "4.18" from "4.18.3.2"
+    kernel_major_minor_version: "{{
+      kernel_package_version.split('+').0.split('.').0
+      }}.{{
+      kernel_package_version.split('+').0.split('.').1
+    }}"
+
+
+
+- name: assert kernel version to use could be identified
+  debug:
+    msg: >-
+      detected kernel
+      package {{ kernel_package }},
+      version {{ kernel_package_version }},
+      upstream {{ kernel_major_minor_version}}
+
+
+
+- name: install required apt packages to compile kernel modules
+  apt:
+    name:
+      - "{{ kernel_package
+            | regex_replace('-dbg$', '')
+            | regex_replace('-unsigned$', '')
+            | regex_replace('-image-', '-headers-')
+        }}"
+      - "linux-source-{{ kernel_major_minor_version }}{{
+          '.0' if ansible_distribution == 'Ubuntu' else ''
+        }}"
+
+      # https://wiki.debian.org/BuildADebianKernelPackage
+      - build-essential
+      - libncurses5-dev
+
+      - libssl-dev
+      - needrestart
+
+  become: yes
+  tags: online
+
+- name: check if we are running the latest kernel installed
+  register: needrestart_result
+  # Specifying the full path here, since ``/usr/sbin/` ìsn't usually
+  # in $PATH of ordinary users, but does not need elevated
+  # rights to execute:
+  command: /usr/sbin/needrestart -kb
+  become: yes
+  changed_when: false
+  tags: verify
+
+- name: reboot if we are not running the latest kernel installed
+  reboot:
+  when: "'NEEDRESTART-KSTA: 1' not in needrestart_result.stdout_lines"
+  become: yes
+  tags: verify
+
+- name: create directory to extract the kernel sources to
+  file:
+    path: "{{ linux_source_dir }}"
+    state: directory
+
+- name: extract kernel sources
+  unarchive:
+    remote_src: yes
+    src: >-
+      /usr/src/linux-source-{{
+        kernel_major_minor_version
+      }}{{
+        '.0' if ansible_distribution == 'Ubuntu' else ''
+      }}.tar.{{
+        'bz2' if ansible_distribution == 'Ubuntu' else 'xz'
+      }}
+    # if the line above turns out to need even more conditionals, we
+    # should probably query the correct file name via ``dpkg-query -L
+    # linux-source-… | grep '\.tar\.'`` or so
+
+    dest: "{{ linux_source_dir }}"
+    extra_opts:  --strip-components=1
+    creates: "{{ linux_source_dir }}/Makefile"
+
+- name: determine kernel patch to use (closest but lower version)
+  set_fact:
+    kernel_patch_file: "{{ item }}"
+  when: >-
+    item
+    | regex_replace('^.*/linux-([^/]*)\\.patch$', '\\1')
+    is version(kernel_major_minor_version, '<=')
+  with_items: >-
+    {{ lookup('fileglob', local_patches_dir ~ '/linux-*.patch',
+              wantlist=True)
+       | sort }}
+  loop_control:
+    label: "{{ item | relpath(playbook_dir) }}"
+
+- name: ensure a kernel patch to use could be determined
+  assert:
+    that: kernel_patch_file is defined
+    fail_msg: >-
+      Could not determine kernel patch to use.
+      Check running kernel on the remotes vs. available patch files in
+      {{ local_patches_dir }}.
+    success_msg: >-
+      will use patch file {{ kernel_patch_file | relpath(playbook_dir) }}
+
+- name: patch kernel sources
+  patch:
+    basedir: "{{ linux_source_dir }}"
+    src: "{{ kernel_patch_file }}"
+
+- name: compile kernel modules
+  make:
+    target: "{{ item.0 }}"
+    chdir: "{{ linux_source_dir }}/{{ item.1 }}"
+    params:
+      # is this the proper way to do it?
+      "--jobs": "{{ ansible_processor_vcpus }}"
+  with_nested:
+    - - clean
+      - all
+    - "{{ wireless_modules | map('dirname') | unique | list }}"
+
+- name: unload kernel modules
+  register: unload_result
+  command: "rmmod {{ (item | basename | splitext).0  }}"
+  ignore_errors: yes
+  with_flattened:
+    - ath10k_pci
+    - ath10k_usb
+    - ath10k_core
+    - "{{ wireless_modules[::-1] }}"
+  tags: configure
+  become: yes
+
+- name: list wireless devices
+  register: find_net_wireless_pre_result
+  shell: find -H /sys/class/net/* -name wireless
+  changed_when: false
+  tags: configure
+  become: yes
+
+- name: load kernel module dependencies
+  modprobe:
+    name: mac80211
+  tags: configure
+  become: yes
+
+- name: load kernel modules
+  register: load_result
+  command: "insmod {{ linux_source_dir }}/{{ item }}"
+  with_items: "{{ wireless_modules }}"
+  tags: configure
+  become: yes
+
+- name: wait until a new wireless devices has been detected
+  register: find_net_wireless_post_result
+  shell: find -H /sys/class/net/* -name wireless
+  changed_when: false
+  until: >
+    find_net_wireless_post_result.stdout_lines | count
+    >
+    find_net_wireless_pre_result.stdout_lines | count
+  delay: 1
+  retries: 10
+  tags: configure
+  become: yes
+
+- name: re-gather facts
+  setup:
+  when: unload_result.changed or load_result.changed
+  tags: configure

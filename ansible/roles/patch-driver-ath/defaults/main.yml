@@ -1,0 +1,17 @@
+# if you want to select a specific kernel package (not recommended)
+#kernel_package: …
+
+linux_source_dir: "~{{
+  ansible_env.SUDO_USER|default(ansible_user_id)
+}}/src-for-11p/linux"
+
+# used to load the modules (and unload in reverse order):
+wireless_modules:
+  - "drivers/net/wireless/ath/ath.ko"
+
+  - "drivers/net/wireless/ath/ath9k/ath9k_hw.ko"
+  - "drivers/net/wireless/ath/ath9k/ath9k_common.ko"
+  - "drivers/net/wireless/ath/ath9k/ath9k_htc.ko"
+  - "drivers/net/wireless/ath/ath9k/ath9k.ko"
+
+local_patches_dir: ../../../patches

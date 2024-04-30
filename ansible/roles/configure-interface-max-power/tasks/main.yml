@@ -1,0 +1,18 @@
+- include_tasks: ../../_include/tasks/detect_wireless_interface.yml
+
+- become: yes
+  tags: configure
+  block:
+
+    - name: set regulatory domain
+      command: "iw reg set {{ wireless_regulatory_domain }}"
+      when: wireless_regulatory_domain is defined
+
+    - name: deactivate power save
+      command: "iw dev {{ wireless_interface }} set power_save off"
+      ignore_errors: true
+
+    - name: set maximum TX power
+      register: set_txpower_result
+      command: >
+        iw dev {{ wireless_interface }} set txpower fixed 100000000

@@ -1,0 +1,55 @@
+# In order to insert regulatory information about 802.11p's new
+# 5.9 GHz band, we need to update the wireless regulatory database.
+
+- name: install dependencies of ``wireless-regdb``
+  apt:
+    name:
+      - git
+      # required by ``wireless-regdb``'s helper script ``db2fw.py``:
+      # (we use Python 3 so this works on new OSs, where Python 2 is
+      # deprecated, as well)
+      - python3
+      - python3-m2crypto
+      - python3-future
+      - make
+      - gcc
+      - g++
+  become: yes
+  tags: online
+
+- name: clone repository of ``wireless-regdb``
+  git:
+    repo: git://git.kernel.org/pub/scm/linux/kernel/git/sforshee/wireless-regdb.git
+    dest: "{{ wireless_regdb_source_dir }}"
+    force: yes
+  tags: online
+
+- name: patch ``wireless-regdb`` sources
+  patch:
+    basedir: "{{ wireless_regdb_source_dir }}"
+    src: ../../../../patches/wireless-regdb.patch
+
+- name: delete original wirless db.txt
+  ansible.builtin.file:
+    path: /root/src-for-11p/wireless-regdb/db.txt
+    state: absent
+
+- name: change wireless db.txt
+  ansible.builtin.template:
+    src: db.txt.template
+    dest: /root/src-for-11p/wireless-regdb/db.txt
+
+- name: clean, compile and install ``wireless-regdb``
+  make:
+    target: "{{ item.target }}"
+    chdir: "{{ wireless_regdb_source_dir }}"
+  become: "{{ item.become }}"
+  with_items:
+    - target: maintainer-clean
+      become: no
+    - target: clean
+      become: no
+    - target: all
+      become: no
+    - target: install
+      become: yes

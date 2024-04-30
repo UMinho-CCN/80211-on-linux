@@ -1,0 +1,7 @@
+wireless_regdb_source_dir: "~{{
+  ansible_env.SUDO_USER|default(ansible_user_id)
+}}/src-for-11p/wireless-regdb"
+
+crda_source_dir: "~{{
+  ansible_env.SUDO_USER|default(ansible_user_id)
+}}/src-for-11p/crda"
